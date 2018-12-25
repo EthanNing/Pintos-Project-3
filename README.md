@@ -31,6 +31,8 @@ Pintos Project 3 : Virtual Memory
       * Function to find whether the current thread have the spte with given uva inside.
     * bool page_load (void *uva)
       * Function to load in page using specific functions.
+    * bool page_grow_stack (void *uva)
+      Function to impelement stack growth when new page is needed (with given uav inside)
   * in frame.c
     * void* frame_allocate_user(void);
       * Allocates a new physical frame for current user process.

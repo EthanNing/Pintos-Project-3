@@ -1,6 +1,6 @@
 #ifndef VM_PAGE_H
 #define VM_PAGE_H
-#define MAx_STACK_SIZE (1024*1024)//Set the MAx_STACK_SIZE to be 2MB
+#define MAX_STACK_SIZE (1024*1024)//Set the MAx_STACK_SIZE to be 2MB
 
 #include "threads/thread.h"
 #include <hash.h>
@@ -42,5 +42,6 @@ struct sup_page_table_entry {
 /* Allocates a new virtual page for current user process and install the page
     into the process' page table. */
 bool page_allocate_user(void *upage);
+bool page_grow_stack (void *uva);
 
 #endif /* vm/page.h */

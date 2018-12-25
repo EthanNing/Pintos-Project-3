@@ -33,7 +33,7 @@ void* frame_allocate_user(void) {
     void *kpage = palloc_get_page(PAL_USER | PAL_ZERO);
     if(kpage != NULL) {
         // Successfully acquired a frame from user pool
-        frame_add_to_table(kpage)
+        frame_add_to_table(kpage);
         //Add that page to page table 
         return kpage;
     }
@@ -50,7 +50,7 @@ void frame_add_to_table (void *frame){
     struct frame_entry *fte = malloc(sizeof(struct frame_entry));
     fte->frame = frame;
     //Set the address
-    fte->tid = thread_tid(c);
+    fte->tid = thread_tid();
     //Set the tid to be current thread's tid
  
     lock_acquire(&frame_table_lock);
