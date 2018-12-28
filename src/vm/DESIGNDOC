@@ -1,7 +1,7 @@
-       	       	    +---------------------------+
-		    |		ESTR3102		
+       	    +---------------------------+
+		    |		ESTR3102            |
 		    | PROJECT 3: VIRTUAL MEMORY	|
-		    |	   DESIGN DOCUMENT	|
+		    |	   DESIGN DOCUMENT	    |
 		    +---------------------------+
 
 ---- GROUP ----
@@ -42,16 +42,83 @@ process.c
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+struct lock frame_table_lock;
+/*Lock used when access the frame entry, because frame is not
+owned by process, there might be a race condition#*/
+
+struct list frame_table;
+/*Global variable list to keep track of all frame*/
+
+struct frame_entry {
+	void *frame;
+	// Pointer to the physical memory frame
+   	struct thread *owner;
+   	// The owner of the frame
+   	struct sup_page_table_entry *spte;
+   	// Pointer to the page table entry currently using this physical frame
+   	struct list_elem elem;
+};
+
+
+struct sup_page_table_entry {
+	uint8_t type;
+	// Indicates whether the entry is a file, swap or mmap
+   	void *uvaddr;
+   	// The user virtual address of physical memory page
+   	bool writable;
+   	// Whether the physical page is writable or not
+   	bool is_loaded;
+   	// Indicates whether the entry has been loaded into
+
+   	struct file *file;
+   	// The file the page was read from
+   	size_t offset;
+   	// The offset from which the page was read
+   	size_t read_bytes;
+   	// How many are valid read bytes
+   	size_t zero_bytes;
+   	// How many are zero bytes
+
+   	size_t swap_index;
+   	/*If the entry is of type swap and the entry has
+    been swapped to disk, this indicates the sectors
+    it has been swapped to on the swap partition*/
+    struct hash_elem elem;
+    // The hash element to add to the supplemental
+    bool no_eviction;
+    //avoid race condition in eviction and page fault and syscall
+ };
+
+
 ---- ALGORITHMS ----
 
 >> A2: In a few paragraphs, describe your code for locating the frame,
 >> if any, that contains the data of a given page.
 
+Taking the following code in mmap_release_page() as example:
+
+if(spte->is_loaded) {
+	...
+	void* kpage = pagedir_get_page(thread_current()->pagedir, uvaddr)
+	...
+	}
+
+When giving the page (user virtual address to be precise), first we 
+can use uvaddr to acquire its spte, then we can check the boolean 
+variable is_loaded. If we do have a loaded spte, we can use 
+pagedir_get_page() function to get its corresponding frame. 
+
+If the loaded indcator is false, the exception is handled via 
+page_fault handler. The handler will deal with this by calling 
+page_load() to the fault_addr and return.
+
+
 >> A3: How does your code coordinate accessed and dirty bits between
 >> kernel and user virtual addresses that alias a single frame, or
 >> alternatively how do you avoid the issue?
 
-The only access menthod is resricted to uvaddr, no other ways.
+The only access menthod from kernel to user memory is resricted to 
+uvaddr, no other ways.
 
 ---- SYNCHRONIZATION ----
 
@@ -60,15 +127,15 @@ The only access menthod is resricted to uvaddr, no other ways.
 
 We can make this sure by using one given lock and one newly-added lock.
 
-Acquiring a new frame needs two steps: first we do frame allocation 
-through palloc_get_page(). In this function, we make sure that access 
-to bitmap, the race condition, is secured by holding pool_lock. 
-Secondly, when need to adding the new frame into the frame table (list), 
-we create a frame_table_lock in case that there is race condition when 
-access the frame table. Only the process holding the frame_table_lock 
-is able to access the frame table. 
+Acquiring a new frame needs two steps: first we do frame allocation
+through palloc_get_page(). In this function, we make sure that access
+to bitmap, the race condition, is secured by holding pool_lock.
+Secondly, when need to adding the new frame into the frame table (list),
+we create a frame_table_lock in case that there is race condition when
+access the frame table. Only the process holding the frame_table_lock
+is able to access the frame table.
 
-With two locks above, we can avoid race condition when both processes 
+With two locks above, we can avoid race condition when both processes
 need a new frame.
 
 ---- RATIONALE ----
@@ -76,21 +143,21 @@ need a new frame.
 >> A5: Why did you choose the data structure(s) that you did for
 >> representing virtual-to-physical mappings?
 
-New structures are mainly frame table and supplymentary page table 
-and their entries. We implement this by the suggestions of Pintos 
+New structures are mainly frame table and supplymentary page table
+and their entries. We implement this by the suggestions of Pintos
 Guide on Piazza.
 
-The frame table is to keep track of all frames allocated through 
-calling palloc_get_page(). As written in pintos guide, "The goal 
-of this table is to make the process of eviction much more efficient 
-by keeping information about frames both readily accessible and 
-organized". So when doing eviction or reclamation, the specific 
+The frame table is to keep track of all frames allocated through
+calling palloc_get_page(). As written in pintos guide, "The goal
+of this table is to make the process of eviction much more efficient
+by keeping information about frames both readily accessible and
+organized". So when doing eviction or reclamation, the specific
 frame like victim will be much more easy to manage.
 
-The supplymentary page table is add aiming to impelement page 
-fault and page freeing as suggested in Pintos guide. When having 
-page fault, the handler can access the spte to determine the loading 
-source, such as from file or from swap. Second is when having process 
+The supplymentary page table is add aiming to impelement page
+fault and page freeing as suggested in Pintos guide. When having
+page fault, the handler can access the spte to determine the loading
+source, such as from file or from swap. Second is when having process
 exiting, we need to refer to the spte to determine what will be freed.
 
 
@@ -184,14 +251,37 @@ cannot be evicted. We use a lock for swap, and no else locks in this project.
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+struct mmap_desc {
+    int mapid;
+    struct file* file;
+    void* addr;
+    int n_pages;
+    struct list_elem elem;
+};
+
+Description: used for storing information about memory mapped file (similar to file_desc)
+
 ---- ALGORITHMS ----
 
 >> C2: Describe how memory mapped files integrate into your virtual
 >> memory subsystem.  Explain how the page fault and eviction
 >> processes differ between swap pages and other pages.
 
+Memory mapped files are loaded using the same scheme as load_segment, since they
+both loads memory content from a file. Their difference is that 1. mmap files can
+be written 2. it is written back to file when it is evicted, when process exits,
+and when munmap is called. When a page fault happends, mmap pages will read page
+content from a opened file, while swap pages will swap back pages from a swap block
+device. When evicting, the content of a mmap page is written back to the file, and
+the content of a swap page is stored in the swap block device.
+
 >> C3: Explain how you determine whether a new file mapping overlaps
 >> any existing segment.
+
+We determined this by checking if every page that will be covered by mmap area do
+not have a supplementary page table entry--which means that they are not used by
+1. other mmap files 2. code segment 3. stack segment, which then means that it is
+free to use.
 
 ---- RATIONALE ----
 
@@ -201,6 +291,14 @@ cannot be evicted. We use a lock for swap, and no else locks in this project.
 >> that much of their implementation can be shared.  Explain why your
 >> implementation either does or does not share much of the code for
 >> the two situations.
+
+Our implementation shared much of the code for these two situations. Since the
+only difference lies in 1. whether the segment is writable 2. behavior is different
+during eviction--mmap files needs to write the content back, but data segment do not.
+So we used the same function to load these pages when a page fault happens. Since
+they both reads from a file, the data structure needed is also very similar: file
+pointer, offset... Therefore, we shared a lot of code between these two kinds of
+pages, only taking special care when dealing with write-back situations.
 
 			   SURVEY QUESTIONS
 			   ================

@@ -1,3 +1,16 @@
-#ifdef VM_SWAP_H
+#ifndef VM_SWAP_H
 #define VM_SWAP_H
-#endif
+#include <bitmap.h>
+#include "devices/block.h"
+#include "threads/vaddr.h"
+#include "threads/synch.h"
+
+#define SECTOR_FREE 0
+#define SECTOR_USED 1
+
+#define SECTOR_PER_PAGE (PGSIZE/BLOCK_SECTOR_SIZE)
+
+void swap_init(void);
+size_t swap_out(void *frame);
+void swap_in(size_t swap_index, void* uva);
+#endif 

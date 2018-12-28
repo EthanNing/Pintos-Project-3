@@ -1,5 +1,11 @@
 #include "vm/frame.h"
+#include "vm/page.h"
+#include "vm/swap.h"
+#include "filesys/file.h"
 #include "threads/palloc.h"
+#include "threads/malloc.h"
+#include "userprog/pagedir.h"
+#include <stdio.h>
 
 /*Function to initialize the frame table and lock*/
 void frame_table_init (void){
@@ -29,43 +35,78 @@ void frame_free (void *frame){
 }
 
 /*Function to allocate the frame, the allocated frame will be added to the frame table*/
-void* frame_allocate_user(void) {
+void* frame_allocate_user(struct sup_page_table_entry *spte) {
     void *kpage = palloc_get_page(PAL_USER | PAL_ZERO);
     if(kpage != NULL) {
         // Successfully acquired a frame from user pool
-        frame_add_to_table(kpage);
-        //Add that page to page table 
+        frame_add_to_table(kpage, spte);
+        //Add that page to page table
         return kpage;
     }
     else {
-        // NOT IMPLEMENTED ERROR: NEEDS SWAPPING
-        ASSERT(0);
-        // not reached
-        return NULL;
+        kpage = frame_evict();
+        frame_add_to_table(kpage, spte);
+        return kpage;
     }
 }
 
 /*Function adding the allocated frame to the frame table*/
-void frame_add_to_table (void *frame){
+void frame_add_to_table (void *frame, struct sup_page_table_entry *spte){
     struct frame_entry *fte = malloc(sizeof(struct frame_entry));
     fte->frame = frame;
     //Set the address
-    fte->tid = thread_tid();
-    //Set the tid to be current thread's tid
- 
+    fte->owner = thread_current();
+    fte->spte = spte;
+
     lock_acquire(&frame_table_lock);
     list_push_back(&frame_table, &fte->elem);
     //Add this thread to list
     lock_release(&frame_table_lock);
 }
 /*Function to evict a frame from the list*/
-bool frame_evict (){
+void* frame_evict (void){
     struct list_elem *e;
     lock_acquire(&frame_table_lock);
     //Need lock cause we may have multipule access different processes
-    for (e = list_begin(&frame_table); e != list_end(&frame_table);e = list_next(e)){
-        //Here we should find a victim and swap it to the disk sector
-        //Need further mpelementation
-        return false;
+    while (1) {
+        //if all frames are used, choose the first one
+        for (e = list_begin(&frame_table); e != list_end(&frame_table);e = list_next(e))
+        {
+            struct frame_entry *fra = list_entry(e, struct frame_entry, elem); //check each frame structure
+            if(!(fra->spte)->no_eviction)
+            {
+              struct thread* thre = fra->owner;
+              //if the page is recently accessed, reset it as not accessed
+              if(pagedir_is_accessed(thre->pagedir, fra->spte->uvaddr))
+                pagedir_set_accessed(thre->pagedir, fra->spte->uvaddr, false);
+              //the frame, least recently used
+              else
+              {
+                if(pagedir_is_dirty(thre->pagedir, fra->spte->uvaddr) || fra->spte->type == SWAP)
+                {
+                  if(fra->spte->type == MMAP)
+                  {
+                    //lock_acquire(&filesys_lock);
+                    //write from frame to buffer
+                    file_write_at(fra->spte->file, fra->frame, fra->spte->read_bytes, fra->spte->offset);
+                    //lock_release(&filesys_lock);
+                  }
+                  else{
+                    fra->spte->type = SWAP;
+                    //record the swapped frame
+                    fra->spte->swap_index = swap_out(fra->frame);
+                  }
+                }
+                fra->spte->is_loaded = false; //change the is_loaded
+                list_remove(&fra->elem); //remove the frame from frame table
+                lock_release(&frame_table_lock);
+                pagedir_clear_page(thre->pagedir, fra->spte->uvaddr); //clean the corresponding page
+                palloc_free_page(fra->frame);
+                free(fra); //free the frame
+                return palloc_get_page(PAL_USER); //the next free page, as one is evicted
+              }
+            }
+        }
     }
+
 }
